@@ -1,0 +1,19 @@
+# Data (too large / not to be committed — download instructions are in README)
+data/*
+!data/.gitkeep
+
+# Model checkpoints
+models/*
+!models/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+venv/
+.venv/
+
+# OS
+.DS_Store
+
+.idea/
