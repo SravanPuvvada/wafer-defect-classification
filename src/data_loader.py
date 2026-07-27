@@ -14,9 +14,25 @@ are unlabeled and should be dropped for supervised classification.
 """
 
 import pickle
+import sys
 import numpy as np
 import pandas as pd
 from pathlib import Path
+
+# --- Compatibility shim for old WM-811K pickle files ---
+# LSWMD.pkl was originally saved with an old pandas version (~2018) whose
+# internal module layout has since changed (e.g. pandas.indexes ->
+# pandas.core.indexes). Modern pandas can't unpickle it without this shim,
+# which registers the old module names as aliases pointing at their new
+# locations, purely so pickle.load can resolve them.
+def _apply_pandas_pickle_compat():
+    import pandas.core.indexes as _idx
+    sys.modules.setdefault("pandas.indexes", _idx)
+    try:
+        import pandas.core.indexes.base as _idx_base
+        sys.modules.setdefault("pandas.indexes.base", _idx_base)
+    except ImportError:
+        pass
 
 DEFECT_CLASSES = [
     "Center", "Donut", "Edge-Loc", "Edge-Ring",
@@ -33,6 +49,7 @@ def load_raw(pkl_path: str) -> pd.DataFrame:
             f"(https://www.kaggle.com/datasets/qingyi/wm811k-wafer-map) "
             f"and place it in the data/ folder."
         )
+    _apply_pandas_pickle_compat()
     with open(pkl_path, "rb") as f:
         df = pickle.load(f)
     return df
