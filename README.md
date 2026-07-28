@@ -59,7 +59,7 @@ wafer-defect-classification/
 
 ## Roadmap / Milestones
 
-- [ ] **M1 (this weekend):** Environment set up, dataset downloaded, EDA
+- [X] **M1 (this weekend):** Environment set up, dataset downloaded, EDA
       complete — class distribution, sample wafer visualizations, image
       size/shape analysis
 - [ ] **M2:** Baseline CNN trained, confusion matrix + accuracy/F1 logged
