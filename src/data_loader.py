@@ -51,7 +51,11 @@ def load_raw(pkl_path: str) -> pd.DataFrame:
         )
     _apply_pandas_pickle_compat()
     with open(pkl_path, "rb") as f:
-        df = pickle.load(f)
+        # encoding="latin1" is required because LSWMD.pkl was originally
+        # pickled under Python 2, whose string encoding differs from
+        # Python 3's default. Without this, pickle.load() throws a
+        # UnicodeDecodeError on the very first non-ASCII byte it meets.
+        df = pickle.load(f, encoding="latin1")
     return df
 
 
