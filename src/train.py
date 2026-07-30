@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 
 from data_loader import load_labeled_dataset
-from dataset import WaferMapDataset
+from dataset import WaferMapDataset, DEFECT_CLASSES
 from model import WaferCNN
 
 
@@ -29,7 +29,7 @@ def train():
     # machine. Stratified sampling keeps roughly the same class
     # proportions as the full dataset, so this remains a fair (if
     # smaller) baseline rather than accidentally skewing toward one class.
-    MAX_SAMPLES = None  # set to None to use the full dataset
+    MAX_SAMPLES = 20000  # set to None to use the full dataset
     if MAX_SAMPLES is not None and len(df) > MAX_SAMPLES:
         frac = MAX_SAMPLES / len(df)
         # NOTE: groupby(...).apply(lambda g: g.sample(...)) silently drops
@@ -67,11 +67,27 @@ def train():
     # --- Model, loss, optimizer ---
     model = WaferCNN(num_classes=9, input_size=32).to(device)
 
+    # Compute class weights to address the severe imbalance found during
+    # baseline evaluation (Scratch recall was just 0.012). The weight for
+    # each class is inversely proportional to how often it appears —
+    # rare classes get a higher weight, so the loss function penalizes
+    # mistakes on them more heavily, forcing the model to actually learn
+    # their patterns rather than ignoring them as statistically
+    # unimportant.
+    class_counts = df["label"].value_counts().reindex(DEFECT_CLASSES, fill_value=0)
+    class_weights = (1.0 / class_counts).values
+    class_weights = class_weights / class_weights.sum() * len(DEFECT_CLASSES)
+    class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
+    print("\nClass weights (higher = rarer class, penalized more):")
+    for cls, w in zip(DEFECT_CLASSES, class_weights):
+        print(f"  {cls}: {w:.3f}")
+
     # CrossEntropyLoss is the standard choice for multi-class
     # classification — it combines softmax + negative log-likelihood in
     # one step, and expects raw model outputs (not pre-softmaxed), which
-    # is exactly what WaferCNN.forward() returns.
-    criterion = nn.CrossEntropyLoss()
+    # is exactly what WaferCNN.forward() returns. The `weight` argument
+    # is what actually applies the per-class penalty described above.
+    criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
 
     # Adam is a reliable, commonly-used optimizer that adapts the learning
     # rate per-parameter automatically — a sensible default for a baseline
@@ -121,8 +137,8 @@ def train():
 
     # Save the trained model weights so it can be reloaded later for
     # evaluation (confusion matrix etc.) without retraining from scratch.
-    torch.save(model.state_dict(), "../models/baseline_cnn.pt")
-    print("Model saved to models/baseline_cnn.pt")
+    torch.save(model.state_dict(), "../models/weighted_cnn.pt")
+    print("Model saved to models/weighted_cnn.pt")
 
 
 if __name__ == "__main__":

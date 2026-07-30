@@ -10,6 +10,7 @@ very poorly on rare classes, simply by being excellent at the dominant
 class. This script exposes that honestly, class by class.
 """
 
+import sys
 import torch
 from torch.utils.data import DataLoader, random_split
 import numpy as np
@@ -22,7 +23,7 @@ from dataset import WaferMapDataset, IDX_TO_LABEL, DEFECT_CLASSES
 from model import WaferCNN
 
 
-def evaluate():
+def evaluate(model_path="../models/baseline_cnn.pt", report_suffix=""):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Rebuild the exact same train/val split used during training.
@@ -41,7 +42,7 @@ def evaluate():
 
     # Load the trained model
     model = WaferCNN(num_classes=9, input_size=32).to(device)
-    model.load_state_dict(torch.load("../models/baseline_cnn.pt", map_location=device))
+    model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
 
     all_preds = []
@@ -73,7 +74,7 @@ def evaluate():
     )
     print(report)
 
-    with open("../reports/classification_report.txt", "w") as f:
+    with open(f"../reports/classification_report{report_suffix}.txt", "w") as f:
         f.write(report)
 
     # --- Confusion matrix ---
@@ -86,14 +87,22 @@ def evaluate():
     )
     plt.xlabel("Predicted label")
     plt.ylabel("True label")
-    plt.title("Confusion Matrix — Baseline CNN")
+    plt.title(f"Confusion Matrix{' - ' + report_suffix.strip('_') if report_suffix else ' - Baseline'}")
     plt.tight_layout()
-    plt.savefig("../reports/figures/confusion_matrix.png", dpi=150)
+    plt.savefig(f"../reports/figures/confusion_matrix{report_suffix}.png", dpi=150)
     plt.show()
 
-    print("\nSaved classification report to reports/classification_report.txt")
-    print("Saved confusion matrix to reports/figures/confusion_matrix.png")
+    print(f"\nSaved classification report to reports/classification_report{report_suffix}.txt")
+    print(f"Saved confusion matrix to reports/figures/confusion_matrix{report_suffix}.png")
 
 
 if __name__ == "__main__":
-    evaluate()
+    # Usage:
+    #   python evaluate.py                          -> evaluates baseline_cnn.pt
+    #   python evaluate.py ../models/weighted_cnn.pt weighted  -> evaluates weighted_cnn.pt, saves with "_weighted" suffix
+    if len(sys.argv) >= 3:
+        evaluate(model_path=sys.argv[1], report_suffix=f"_{sys.argv[2]}")
+    elif len(sys.argv) == 2:
+        evaluate(model_path=sys.argv[1])
+    else:
+        evaluate()
