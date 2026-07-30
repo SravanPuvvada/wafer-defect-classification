@@ -127,8 +127,45 @@ mode, and directly mirrors a real risk in fab yield analysis: naive
 accuracy metrics can hide poor detection of rare-but-critical defect
 signatures.
 
-### Next: Milestone 3
+### Milestone 3, Attempt 1: Weighted Loss (raw inverse frequency)
 
-Addressing this with class-imbalance-aware training (weighted loss
-function, prioritizing correct detection of rare classes like Scratch)
-— results will be compared directly against this baseline once complete.
+To address the Scratch-detection failure above, `CrossEntropyLoss` was
+given per-class weights inversely proportional to class frequency —
+rare classes penalized more heavily when misclassified.
+
+| Metric | Baseline | Weighted (raw inverse freq.) |
+|---|---|---|
+| Overall accuracy | 96.0% | 81.4% |
+| Macro-avg F1 | 0.751 | 0.611 |
+| Scratch recall | 0.012 | **0.201** |
+| Scratch precision | 0.600 | 0.015 |
+| "none" F1 | 0.984 | 0.894 |
+
+**What happened:** Scratch recall improved meaningfully (the model now
+actually attempts to detect it), but at a steep cost — precision
+collapsed across several classes (Edge-Loc: 0.697→0.312, Loc:
+0.594→0.271, Scratch: 0.600→0.015), and macro-avg F1 got *worse*, not
+better. Raw inverse-frequency weighting turned out to be too aggressive:
+because Scratch is ~989x rarer than "none," its weight became extreme
+enough to push the model into over-predicting rare classes broadly,
+trading false negatives for a flood of false positives instead of
+striking a genuine balance.
+
+**Takeaway:** naively "fixing" class imbalance can just move the problem
+rather than solve it — this is a real, common pitfall worth being able
+to speak to, not a mistake to hide.
+
+### Milestone 3, Attempt 2: Weighted Loss (inverse square-root frequency)
+
+Softened the weighting scheme — using `1/sqrt(class_count)` instead of
+`1/class_count` — so rare classes are still upweighted, but far less
+extremely, aiming for a middle ground between the baseline and the
+over-corrected first attempt.
+
+_(Results to be added once this run completes.)_
+
+### Next: Milestone 4
+
+Final writeup polishing the comparison across all three models above,
+and connecting the class-imbalance findings explicitly back to
+real-world fab yield/defect-triage risk.
