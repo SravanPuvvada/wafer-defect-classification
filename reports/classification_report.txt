@@ -1,0 +1,15 @@
+              precision    recall  f1-score   support
+
+      Center      0.875     0.909     0.892       891
+       Donut      0.848     0.826     0.837       115
+    Edge-Loc      0.697     0.830     0.758       988
+   Edge-Ring      0.965     0.955     0.960      1941
+         Loc      0.594     0.640     0.616       717
+   Near-full      0.900     0.818     0.857        22
+      Random      0.819     0.846     0.832       182
+     Scratch      0.600     0.012     0.024       244
+        none      0.984     0.984     0.984     29489
+
+    accuracy                          0.960     34589
+   macro avg      0.809     0.758     0.751     34589
+weighted avg      0.960     0.960     0.958     34589

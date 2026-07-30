@@ -8,6 +8,7 @@ number to improve upon, and to confirm the full pipeline (data -> model
 """
 
 import torch
+import numpy as np
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
@@ -23,6 +24,26 @@ def train():
 
     # --- Load and split data ---
     df = load_labeled_dataset("../data/LSWMD.pkl")
+
+    # Optional: subsample the dataset if running on a memory-constrained
+    # machine. Stratified sampling keeps roughly the same class
+    # proportions as the full dataset, so this remains a fair (if
+    # smaller) baseline rather than accidentally skewing toward one class.
+    MAX_SAMPLES = None  # set to None to use the full dataset
+    if MAX_SAMPLES is not None and len(df) > MAX_SAMPLES:
+        frac = MAX_SAMPLES / len(df)
+        # NOTE: groupby(...).apply(lambda g: g.sample(...)) silently drops
+        # the grouping column ("label") in newer pandas versions — using
+        # sample_indices + .loc[] instead avoids that pitfall entirely.
+        sample_indices = (
+            df.groupby("label", group_keys=False)
+              .apply(lambda g: g.sample(frac=frac, random_state=42).index)
+        )
+        flat_indices = np.concatenate(sample_indices.values) if hasattr(sample_indices, "values") else sample_indices
+        df = df.loc[flat_indices].reset_index(drop=True)
+        print(f"Subsampled to {len(df)} wafers (from full labeled set) "
+              f"to reduce memory usage.")
+
     full_dataset = WaferMapDataset(df, target_size=32, min_area=100)
 
     # 80/20 train/validation split. Validation data is held out and never
@@ -31,6 +52,11 @@ def train():
     # if the model is genuinely learning or just memorizing.
     val_size = int(0.2 * len(full_dataset))
     train_size = len(full_dataset) - val_size
+    # Fixed seed ensures this exact same split can be reproduced later in
+    # evaluate.py — without this, re-running random_split would produce a
+    # DIFFERENT validation set each time, meaning evaluate.py could
+    # accidentally test on data the model was actually trained on.
+    torch.manual_seed(42)
     train_ds, val_ds = random_split(full_dataset, [train_size, val_size])
 
     train_loader = DataLoader(train_ds, batch_size=64, shuffle=True)
