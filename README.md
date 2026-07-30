@@ -59,10 +59,10 @@ wafer-defect-classification/
 
 ## Roadmap / Milestones
 
-- [X] **M1 (this weekend):** Environment set up, dataset downloaded, EDA
+- [x] **M1:** Environment set up, dataset downloaded, EDA
       complete — class distribution, sample wafer visualizations, image
       size/shape analysis
-- [ ] **M2:** Baseline CNN trained, confusion matrix + accuracy/F1 logged
+- [x] **M2:** Baseline CNN trained, confusion matrix + accuracy/F1 logged
 - [ ] **M3:** Class imbalance handled (weighted loss / augmentation /
       resampling), model improved, results compared to baseline
 - [ ] **M4:** Clean writeup connecting results to real fab defect
@@ -79,4 +79,56 @@ constraints like class imbalance).
 
 ## Results
 
-_(To be filled in as milestones are completed.)_
+### Exploratory Data Analysis
+- **172,950** labeled wafer maps used (out of 811,457 total; the rest are
+  unlabeled and excluded from supervised training)
+- **Severe class imbalance**: most common class ("none") outnumbers the
+  rarest class by roughly **989:1**
+- Wafer map dimensions vary substantially across the dataset (from tiny,
+  likely-corrupted outliers like a (15,3) grid up to (153,187)); most
+  common shape is around (25,27). All maps are resized to a fixed
+  **32×32** target for CNN input, using nearest-neighbor interpolation to
+  preserve the categorical (pass/fail/blank) nature of the data
+- A small number of degenerate wafer maps (extreme outlier shapes,
+  likely data artifacts rather than genuine signal) were identified and
+  excluded via a minimum-area filter before training
+
+### Baseline CNN (no class-imbalance handling)
+
+A small custom 2-layer CNN (see `src/model.py`) was trained for 10
+epochs on the full labeled dataset (80/20 train/validation split).
+
+| Metric | Score |
+|---|---|
+| Overall accuracy | 96.0% |
+| Weighted-avg F1 | 0.958 |
+| **Macro-avg F1** | **0.751** |
+
+The gap between weighted-avg and macro-avg F1 tells the real story:
+overall accuracy is dominated by the "none" class (85% of validation
+data, F1 = 0.984), which masks poor performance on rarer defect types.
+
+**Per-class breakdown (selected):**
+
+| Class | Support | Precision | Recall | F1 |
+|---|---|---|---|---|
+| none | 29,489 | 0.984 | 0.984 | 0.984 |
+| Edge-Ring | 1,941 | 0.965 | 0.955 | 0.960 |
+| Center | 891 | 0.875 | 0.909 | 0.892 |
+| Edge-Loc | 988 | 0.697 | 0.830 | 0.758 |
+| Loc | 717 | 0.594 | 0.640 | 0.616 |
+| **Scratch** | **244** | 0.600 | **0.012** | **0.024** |
+
+**Key finding:** the model essentially fails to detect the rarest class
+(Scratch, 244 samples) — recall of just 1.2% means it correctly
+identifies almost none of the actual Scratch-type defects, despite
+strong overall accuracy. This is a textbook class-imbalance failure
+mode, and directly mirrors a real risk in fab yield analysis: naive
+accuracy metrics can hide poor detection of rare-but-critical defect
+signatures.
+
+### Next: Milestone 3
+
+Addressing this with class-imbalance-aware training (weighted loss
+function, prioritizing correct detection of rare classes like Scratch)
+— results will be compared directly against this baseline once complete.
