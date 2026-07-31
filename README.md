@@ -162,10 +162,36 @@ Softened the weighting scheme — using `1/sqrt(class_count)` instead of
 extremely, aiming for a middle ground between the baseline and the
 over-corrected first attempt.
 
+| Metric | Baseline | Raw inverse freq. | Sqrt inverse freq. |
+|---|---|---|---|
+| Overall accuracy | 96.0% | 81.4% | 93.8% |
+| Macro-avg F1 | 0.751 | 0.611 | 0.611 |
+| Scratch recall | 0.012 | 0.201 | **0.000** |
+| Donut recall | 0.826 | 0.878 | **0.904** |
+| Near-full recall | 0.818 | 0.955 | 0.909 |
+| Center precision | 0.875 | 0.697 | 0.745 |
+
+**What happened:** the softer weighting recovered precision and overall
+accuracy substantially compared to Attempt 1, and most rare classes
+(Donut, Near-full, Center, Random) landed in a healthy middle ground.
+**But Scratch — the single rarest class (244 samples, ~0.14% of the
+data) — fell through the gap entirely**, reverting to essentially zero
+recall, similar to the original baseline failure.
+
+**Conclusion:** loss-weighting alone cannot fully solve this for the
+most extreme minority class. Scratch is rare enough that no single
+weighting scheme adequately balances "pay enough attention to Scratch"
+against "don't destabilize every other class." This points toward a
+complementary, data-level technique instead of a purely loss-level one.
+
+### Milestone 3, Attempt 3: Oversampling + Rotation Augmentation (in progress)
+
+Rather than reweighting the loss function, this approach oversamples
+rare-class examples (especially Scratch) directly during training via
+`WeightedRandomSampler`, combined with random rotation augmentation —
+defect patterns retain their meaning under rotation (a Scratch is still
+a Scratch rotated 90°), making this a safe, realistic way to
+artificially increase effective rare-class training signal without
+distorting what the pattern represents.
+
 _(Results to be added once this run completes.)_
-
-### Next: Milestone 4
-
-Final writeup polishing the comparison across all three models above,
-and connecting the class-imbalance findings explicitly back to
-real-world fab yield/defect-triage risk.

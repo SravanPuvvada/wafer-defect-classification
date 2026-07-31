@@ -75,7 +75,14 @@ def train():
     # their patterns rather than ignoring them as statistically
     # unimportant.
     class_counts = df["label"].value_counts().reindex(DEFECT_CLASSES, fill_value=0)
-    class_weights = (1.0 / class_counts).values
+    # Using inverse SQUARE ROOT frequency rather than raw inverse frequency.
+    # Raw inverse frequency (1/count) was tried first and proved too
+    # aggressive — it pushed the model to over-predict rare classes,
+    # tanking precision across the board (see README for that comparison).
+    # The square root softens how extreme the rare-class weights become,
+    # aiming for a middle ground: meaningfully better rare-class recall
+    # without destroying precision the way raw inverse frequency did.
+    class_weights = (1.0 / np.sqrt(class_counts)).values
     class_weights = class_weights / class_weights.sum() * len(DEFECT_CLASSES)
     class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
     print("\nClass weights (higher = rarer class, penalized more):")
@@ -137,8 +144,8 @@ def train():
 
     # Save the trained model weights so it can be reloaded later for
     # evaluation (confusion matrix etc.) without retraining from scratch.
-    torch.save(model.state_dict(), "../models/weighted_cnn.pt")
-    print("Model saved to models/weighted_cnn.pt")
+    torch.save(model.state_dict(), "../models/weighted_sqrt_cnn.pt")
+    print("Model saved to models/weighted_sqrt_cnn.pt")
 
 
 if __name__ == "__main__":
