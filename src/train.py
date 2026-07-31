@@ -29,7 +29,7 @@ def train():
     # machine. Stratified sampling keeps roughly the same class
     # proportions as the full dataset, so this remains a fair (if
     # smaller) baseline rather than accidentally skewing toward one class.
-    MAX_SAMPLES = 20000  # set to None to use the full dataset
+    MAX_SAMPLES = 40000  # set to None to use the full dataset
     if MAX_SAMPLES is not None and len(df) > MAX_SAMPLES:
         frac = MAX_SAMPLES / len(df)
         # NOTE: groupby(...).apply(lambda g: g.sample(...)) silently drops
@@ -57,9 +57,45 @@ def train():
     # DIFFERENT validation set each time, meaning evaluate.py could
     # accidentally test on data the model was actually trained on.
     torch.manual_seed(42)
-    train_ds, val_ds = random_split(full_dataset, [train_size, val_size])
+    train_subset, val_subset = random_split(full_dataset, [train_size, val_size])
 
-    train_loader = DataLoader(train_ds, batch_size=64, shuffle=True)
+    # Build SEPARATE dataset objects for train vs validation, using the
+    # same underlying cleaned dataframe (full_dataset.df) but different
+    # settings: training data gets rotation augmentation (helps the
+    # oversampled rare-class examples not look identically repeated every
+    # time they're drawn); validation data must stay completely
+    # unmodified, since it's meant to reflect real, un-augmented wafers
+    # when judging how good the model actually is.
+    train_df = full_dataset.df.iloc[train_subset.indices].reset_index(drop=True)
+    val_df = full_dataset.df.iloc[val_subset.indices].reset_index(drop=True)
+
+    train_ds = WaferMapDataset(train_df, target_size=32, min_area=0, augment=True)
+    val_ds = WaferMapDataset(val_df, target_size=32, min_area=0, augment=False)
+
+    # --- Oversampling via WeightedRandomSampler ---
+    # Rather than reweighting the LOSS (tried in earlier attempts — either
+    # too aggressive or not aggressive enough for the rarest class,
+    # Scratch), this instead changes how often each SAMPLE is drawn during
+    # training. Rare-class wafers get sampled much more frequently than
+    # their natural frequency in the dataset, so the model sees a roughly
+    # balanced stream of examples per batch, without distorting the loss
+    # function's normal behavior.
+    train_label_counts = train_df["label"].value_counts()
+    # Weight per sample = inverse of how common that sample's class is —
+    # a Scratch example (rare) gets a much higher draw-probability weight
+    # than a "none" example (common).
+    sample_weights = train_df["label"].map(lambda lbl: 1.0 / train_label_counts[lbl]).values.copy()
+    sampler = torch.utils.data.WeightedRandomSampler(
+        weights=sample_weights,
+        num_samples=len(sample_weights),  # one full "epoch" worth of draws
+        replacement=True  # necessary — rare classes must be drawable more
+                           # times than they actually exist in the data
+    )
+
+    # NOTE: when using a sampler, shuffle must NOT also be set — the
+    # sampler already controls draw order/frequency, and PyTorch will
+    # raise an error if both are specified together.
+    train_loader = DataLoader(train_ds, batch_size=64, sampler=sampler)
     val_loader = DataLoader(val_ds, batch_size=64, shuffle=False)
 
     print(f"Train samples: {len(train_ds)}, Validation samples: {len(val_ds)}")
@@ -67,41 +103,27 @@ def train():
     # --- Model, loss, optimizer ---
     model = WaferCNN(num_classes=9, input_size=32).to(device)
 
-    # Compute class weights to address the severe imbalance found during
-    # baseline evaluation (Scratch recall was just 0.012). The weight for
-    # each class is inversely proportional to how often it appears —
-    # rare classes get a higher weight, so the loss function penalizes
-    # mistakes on them more heavily, forcing the model to actually learn
-    # their patterns rather than ignoring them as statistically
-    # unimportant.
-    class_counts = df["label"].value_counts().reindex(DEFECT_CLASSES, fill_value=0)
-    # Using inverse SQUARE ROOT frequency rather than raw inverse frequency.
-    # Raw inverse frequency (1/count) was tried first and proved too
-    # aggressive — it pushed the model to over-predict rare classes,
-    # tanking precision across the board (see README for that comparison).
-    # The square root softens how extreme the rare-class weights become,
-    # aiming for a middle ground: meaningfully better rare-class recall
-    # without destroying precision the way raw inverse frequency did.
-    class_weights = (1.0 / np.sqrt(class_counts)).values
-    class_weights = class_weights / class_weights.sum() * len(DEFECT_CLASSES)
-    class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
-    print("\nClass weights (higher = rarer class, penalized more):")
-    for cls, w in zip(DEFECT_CLASSES, class_weights):
-        print(f"  {cls}: {w:.3f}")
-
-    # CrossEntropyLoss is the standard choice for multi-class
-    # classification — it combines softmax + negative log-likelihood in
-    # one step, and expects raw model outputs (not pre-softmaxed), which
-    # is exactly what WaferCNN.forward() returns. The `weight` argument
-    # is what actually applies the per-class penalty described above.
-    criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
+    # No class weighting on the loss this time — balance is now handled
+    # at the SAMPLING level (see WeightedRandomSampler above) instead of
+    # the loss level, avoiding the precision-collapse problems seen when
+    # loss-weighting was pushed too hard in earlier attempts.
+    criterion = nn.CrossEntropyLoss()
 
     # Adam is a reliable, commonly-used optimizer that adapts the learning
     # rate per-parameter automatically — a sensible default for a baseline
     # rather than hand-tuning plain SGD.
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-    num_epochs = 10  # one epoch = one full pass through the training data
+    num_epochs = 20  # one epoch = one full pass through the training data
+
+    # Track the best validation accuracy seen so far, and save the model
+    # only when it improves. This matters especially here because
+    # WeightedRandomSampler-based oversampling can cause validation
+    # accuracy to swing noticeably between epochs (training batches show
+    # an artificially rebalanced class distribution, while validation
+    # still reflects the real, imbalanced world) — so the LAST epoch is
+    # not reliably the BEST epoch, unlike a more stable training setup.
+    best_val_acc = 0.0
 
     for epoch in range(num_epochs):
         # --- Training phase ---
@@ -142,10 +164,18 @@ def train():
         print(f"Epoch {epoch+1}: train_loss={train_loss:.4f}, "
               f"train_acc={train_acc:.4f}, val_acc={val_acc:.4f}")
 
-    # Save the trained model weights so it can be reloaded later for
-    # evaluation (confusion matrix etc.) without retraining from scratch.
-    torch.save(model.state_dict(), "../models/weighted_sqrt_cnn.pt")
-    print("Model saved to models/weighted_sqrt_cnn.pt")
+        # Save a checkpoint only when this epoch beats the best validation
+        # accuracy seen so far — this is what "best checkpoint" means in
+        # practice: at any point, models/oversampled_cnn.pt reflects the
+        # single best-performing epoch, not just whichever epoch happened
+        # to run last.
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            torch.save(model.state_dict(), "../models/oversampled_cnn.pt")
+            print(f"  -> New best val_acc ({val_acc:.4f}), checkpoint saved.")
+
+    print(f"\nTraining complete. Best validation accuracy: {best_val_acc:.4f}")
+    print("Best model saved to models/oversampled_cnn.pt")
 
 
 if __name__ == "__main__":

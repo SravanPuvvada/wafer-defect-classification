@@ -184,14 +184,74 @@ weighting scheme adequately balances "pay enough attention to Scratch"
 against "don't destabilize every other class." This points toward a
 complementary, data-level technique instead of a purely loss-level one.
 
-### Milestone 3, Attempt 3: Oversampling + Rotation Augmentation (in progress)
+### Milestone 3, Attempt 3: Oversampling + Rotation Augmentation
 
-Rather than reweighting the loss function, this approach oversamples
-rare-class examples (especially Scratch) directly during training via
-`WeightedRandomSampler`, combined with random rotation augmentation —
-defect patterns retain their meaning under rotation (a Scratch is still
-a Scratch rotated 90°), making this a safe, realistic way to
-artificially increase effective rare-class training signal without
-distorting what the pattern represents.
+Switched strategy from loss-level reweighting to data-level rebalancing:
+`WeightedRandomSampler` oversamples rare-class wafers during training
+(so the model sees a roughly balanced stream of examples per batch),
+combined with random 90°-multiple rotation augmentation (safe here since
+a defect pattern's identity is rotation-invariant — a Scratch is still a
+Scratch at any angle). Also introduced best-epoch checkpointing (saving
+whichever of 20 epochs had the highest validation accuracy, rather than
+just the final epoch) since oversampled training showed noticeably
+unstable epoch-to-epoch validation accuracy. Trained on 40,000 samples
+(stratified subsample) for 20 epochs.
 
-_(Results to be added once this run completes.)_
+| Metric | Baseline | Raw inv. freq | Sqrt inv. freq | Oversampling |
+|---|---|---|---|---|
+| Overall accuracy | 96.0% | 81.4% | 93.8% | 88.4% |
+| Macro-avg F1 | 0.751 | 0.611 | 0.611 | 0.700 |
+| **Macro-avg recall** | ~0.76* | ~0.75* | ~0.68* | **0.827** |
+| Scratch recall | 0.012 | 0.201 | 0.000 | **0.402** |
+| Scratch precision | 0.600 | 0.015 | 0.000 | 0.085 |
+| Loc recall | 0.640 | 0.328 | 0.240 | 0.637 |
+| none recall | 0.984 | 0.828 | 0.979 | 0.891 |
+
+*_macro-avg recall wasn't explicitly logged for earlier attempts;
+approximate values shown for context, derivable from per-class reports
+in `reports/`._
+
+**What happened:** this is the strongest, most balanced result across
+all four attempts. Every class now has meaningful recall (all above
+0.40, most above 0.80) — a clear improvement over both loss-weighting
+attempts, where rare classes either got too much correction (precision
+collapse) or too little (Scratch recall reverting to ~0). The trade-off
+is a drop in overall accuracy and macro-F1 compared to the baseline,
+driven by lower precision on several classes (the model now casts a
+wider net and accepts more false positives in exchange for catching far
+more true positives).
+
+**Why this trade-off is the right one for this problem:** in a real fab
+defect-triage context, a missed defect (false negative) is typically far
+more costly than a false alarm that gets reviewed and dismissed by an
+engineer. Prioritizing recall — especially for rare-but-real defect
+types like Scratch — over raw accuracy or precision reflects that
+real-world cost asymmetry, rather than optimizing for a metric that
+looks good on paper but hides a critical blind spot (as the baseline
+did).
+
+### Milestone 3: Conclusion
+
+Three different imbalance-handling strategies were tried and compared
+directly:
+1. **Loss reweighting (raw inverse frequency)** — improved rare-class
+   recall but caused precision to collapse broadly; too aggressive
+2. **Loss reweighting (sqrt inverse frequency)** — better precision
+   balance, but the softer correction wasn't enough for the rarest class
+   (Scratch), which reverted to ~0 recall
+3. **Oversampling + augmentation** — best overall balance; every class
+   achieves meaningful recall, at the cost of some precision/overall
+   accuracy — a trade-off deliberately justified by the real-world cost
+   of missed defects in fab yield analysis
+
+This progression — trying a technique, diagnosing exactly why it fell
+short, and iterating toward a better approach — is arguably the most
+valuable part of this project to discuss in an interview, more so than
+any single final number.
+
+### Next: Milestone 4
+
+Final polish: clean up the repo structure, add a short standalone
+summary/writeup connecting these findings explicitly to real fab
+defect-triage workflows, and ensure the README (this document) stands
+alone as a complete narrative for anyone reviewing the portfolio.

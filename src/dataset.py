@@ -24,7 +24,7 @@ IDX_TO_LABEL = {idx: label for label, idx in LABEL_TO_IDX.items()}
 
 
 class WaferMapDataset(Dataset):
-    def __init__(self, dataframe, target_size=32, min_area=100):
+    def __init__(self, dataframe, target_size=32, min_area=100, augment=False):
         """
         dataframe : the labeled (and ideally outlier-filtered) wafer DataFrame
         target_size : every wafer map gets resized to (target_size, target_size)
@@ -33,10 +33,22 @@ class WaferMapDataset(Dataset):
         min_area : safety net — drops any degenerate wafer maps (like the
                    (15,3) one you found) that slipped through, based on
                    total die count.
+        augment : if True, applies a random 90/180/270-degree rotation to
+                  each sample on every access. Used together with
+                  oversampling (WeightedRandomSampler) so that rare-class
+                  examples aren't just repeated identically many times —
+                  each repeat looks slightly different, which helps the
+                  model learn the general pattern rather than memorizing
+                  exact pixel arrangements. Rotation is a safe augmentation
+                  choice here specifically because a defect pattern's
+                  identity doesn't change under rotation (a Scratch is
+                  still a Scratch at any angle) — unlike, say, digit
+                  images, where rotating a 6 can turn it into a 9.
         """
         areas = dataframe["waferMap"].apply(lambda x: x.shape[0] * x.shape[1])
         self.df = dataframe[areas >= min_area].reset_index(drop=True)
         self.target_size = target_size
+        self.augment = augment
 
     def __len__(self):
         # Tells PyTorch (and you) how many samples are in this dataset.
@@ -57,6 +69,19 @@ class WaferMapDataset(Dataset):
             wafer, (self.target_size, self.target_size),
             interpolation=cv2.INTER_NEAREST
         )
+
+        if self.augment:
+            # Randomly rotate by 0, 90, 180, or 270 degrees. np.rot90 is
+            # used (rather than cv2's rotation) because it's an exact,
+            # lossless rotation for square arrays — no interpolation
+            # artifacts, which matters since these are categorical values.
+            k = np.random.randint(0, 4)
+            resized = np.rot90(resized, k=k).copy()  # .copy() avoids a
+                                                        # negative-stride
+                                                        # array, which
+                                                        # torch.tensor()
+                                                        # cannot accept
+                                                        # directly
 
         # Normalize pixel values from {0,1,2} down to a 0-1 float range.
         # Neural networks train more reliably on small, consistently-scaled
